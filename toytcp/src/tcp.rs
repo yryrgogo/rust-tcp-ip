@@ -20,34 +20,40 @@ const MSS: usize = 1460;
 const PORT_RANGE: Range<u16> = 40000..60000;
 
 pub struct TCP {
-	sockets: HashMap<SockID, Socket>,
+    sockets: RwLock<HashMap<SockID, Socket>>,
+	event_condvar: (Mutex<Option<TCPEvent>>, Condvar),
 }
 
 impl TCP {
-	pub fn new() -> Self {
-		let sockets = HashMap::new();
-		let tcp = Self {sockets};
-		tcp
-	}
+    pub fn new() -> Arc<Self> {
+        let sockets = RwLock::new(HashMap::new());
+        let tcp = Arc::new(Self { sockets, event_condvar: (Mutex::new(None), Condvar::new()) });
+		let cloned_tcp = tcp.clone();
+		std::thread::spawn(move || {
+			// パケットの受信用スレッド
+			cloned_tcp.receive_handler().unwrap();
+		});
+        tcp
+    }
 
-	fn select_unused_port(&self, rng: &mut ThreadRng) -> Result<u16> {
-		Ok(33445)
-	}
+    fn select_unused_port(&self, rng: &mut ThreadRng) -> Result<u16> {
+        Ok(33445)
+    }
 
-	pub fn connect(&self, addr: Ipv4Addr, port: u16) -> Result<SockID> {
-		let mut rng = rand::thread_rng();
-		let mut socket = Socket::new(
-			get_source_addr_to(addr)?,
-			addr,
-			self.select_unused_port(&mut rng)?,
-			port,
-		)?;
-		socket.send_tcp_packet(tcpflags::SYN, &[])?;
-		let sock_id = socket.get_sock_id();
-		Ok(sock_id)
-	}
+    pub fn connect(&self, addr: Ipv4Addr, port: u16) -> Result<SockID> {
+        let mut rng = rand::thread_rng();
+        let mut socket = Socket::new(
+            get_source_addr_to(addr)?,
+            addr,
+            self.select_unused_port(&mut rng)?,
+            port,
+        )?;
+        socket.send_tcp_packet(tcpflags::SYN, &[])?;
+        let sock_id = socket.get_sock_id();
+        Ok(sock_id)
+    }
 }
 
 fn get_source_addr_to(addr: Ipv4Addr) -> Result<Ipv4Addr> {
-	Ok("10.0.0.1".parse().unwrap())
+    Ok("10.0.0.1".parse().unwrap())
 }
