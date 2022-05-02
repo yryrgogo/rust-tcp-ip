@@ -1,5 +1,8 @@
 FROM ubuntu:20.04
 
+WORKDIR app
+
+COPY setup.sh .
 RUN apt update \
 	&& apt install sudo \
 	&& sudo apt-get update \
@@ -7,3 +10,4 @@ RUN apt update \
 	iproute2 iputils-ping traceroute tcpdump bind9-dnsutils \
 	dnsmasq-base netcat-openbsd python3 curl wget iptables \
 	procps isc-dhcp-client ethtool
+
