@@ -26,6 +26,15 @@ impl TCPPacket {
         u16::from_be_bytes([self.buffer[2], self.buffer[3]])
     }
 
+    pub fn get_seq(&self) -> u32 {
+        u32::from_be_bytes([
+            self.buffer[4],
+            self.buffer[5],
+            self.buffer[6],
+            self.buffer[7],
+        ])
+    }
+
     pub fn get_ack(&self) -> u32 {
         u32::from_be_bytes([
             self.buffer[8],
