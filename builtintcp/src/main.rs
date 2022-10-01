@@ -14,6 +14,7 @@ fn echo_server(address: &str) -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind(address)?;
     loop {
         let (mut stream, _) = listener.accept()?;
+
         thread::spawn(move || {
             let mut buffer = [0u8; 1024];
             loop {
