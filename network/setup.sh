@@ -1,4 +1,4 @@
-#!/bin/bash
+# !/bin/bash
 
 set -eux
 
@@ -23,7 +23,6 @@ sudo ip netns exec host1 ip link set host1-veth1 up
 sudo ip netns exec router ip link set router-veth1 up
 sudo ip netns exec router ip link set router-veth2 up
 sudo ip netns exec host2 ip link set host2-veth1 up
-
 sudo ip netns exec host1 ip link set lo up
 sudo ip netns exec router ip link set lo up
 sudo ip netns exec host2 ip link set lo up
@@ -36,6 +35,6 @@ sudo ip netns exec router sysctl -w net.ipv4.ip_forward=1
 sudo ip netns exec host1 sudo iptables -A OUTPUT -p tcp --tcp-flags RST RST -j DROP
 sudo ip netns exec host2 sudo iptables -A OUTPUT -p tcp --tcp-flags RST RST -j DROP
 
-# turn off chechsum offloading
+# turn off checksum offloading
 sudo ip netns exec host2 sudo ethtool -K host2-veth1 tx off
 sudo ip netns exec host1 sudo ethtool -K host1-veth1 tx off
