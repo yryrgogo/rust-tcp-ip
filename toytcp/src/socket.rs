@@ -121,6 +121,7 @@ impl Socket {
             },
             status,
             connected_connection_queue: VecDeque::new(),
+            retransmission_queue: VecDeque::new(),
             listening_socket: None,
             sender,
         })

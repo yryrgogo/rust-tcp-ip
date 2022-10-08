@@ -14,8 +14,8 @@ use std::{cmp, ops::Range, str, thread};
 
 const UNDETERMINED_IP_ADDR: std::net::Ipv4Addr = Ipv4Addr::new(0, 0, 0, 0);
 const UNDETERMINED_PORT: u16 = 0;
-const MAX_TRANSMITTION: u8 = 5;
-const RETRANSMITTION_TIMEOUT: u64 = 3;
+const MAX_TRANSMISSION: u8 = 5;
+const RETRANSMISSION_TIMEOUT: u64 = 3;
 const MSS: usize = 1460;
 const PORT_RANGE: Range<u16> = 40000..60000;
 
@@ -51,11 +51,66 @@ impl TCP {
             sockets,
             event_condvar: (Mutex::new(None), Condvar::new()),
         });
+
         let cloned_tcp = tcp.clone();
         std::thread::spawn(move || {
             cloned_tcp.receive_handler().unwrap();
         });
+
+        let cloned_tcp = tcp.clone();
+        std::thread::spawn(move || {
+            cloned_tcp.timer();
+        });
+
         tcp
+    }
+
+    /// thread function for timer
+    /// Look at the retransmission queue for all sockets and retransmit packet that have timed out
+    fn timer(&self) {
+        dbg!("begin timer thread");
+        loop {
+            let mut table = self.sockets.write().unwrap();
+            for (sock_id, socket) in table.iter_mut() {
+                while let Some(mut item) = socket.retransmission_queue.pop_front() {
+                    // removing acknowledged seguments from the retransmission queue
+                    // required to remove segments sent when not in established state
+                    if socket.send_param.unacked_seq > item.packet.get_seq() {
+                        dbg!("successfully acked", item.packet.get_seq());
+                        // Restore the window size by the amount of data received
+                        socket.send_param.window += item.packet.payload().len() as u16;
+                        self.publish_event(*sock_id, TCPEventKind::Acked);
+                        continue;
+                    }
+                    // check if timeout
+                    if item.latest_transmission_time.elapsed().unwrap()
+                        < Duration::from_secs(RETRANSMISSION_TIMEOUT)
+                    {
+                        // if the retrieved entry has not timed out, then subsequent entries in the queue have not timed out either
+                        // return to the head
+                        socket.retransmission_queue.push_front(item);
+                        break;
+                    }
+                    // if not acknowledged and timed out, retransmit
+                    if item.transmission_count < MAX_TRANSMISSION {
+                        dbg!("retransmit");
+                        socket
+                            .sender
+                            .send_to(item.packet.clone(), IpAddr::V4(socket.remote_addr))
+                            .context("failed to retransmit")
+                            .unwrap();
+                        item.transmission_count += 1;
+                        item.latest_transmission_time = SystemTime::now();
+                        socket.retransmission_queue.push_back(item);
+                        break;
+                    } else {
+                        dbg!("reached MAX_TRANSMISSION");
+                    }
+                }
+            }
+            drop(table);
+            thread::sleep(Duration::from_millis(100));
+        }
     }
 
     pub fn listen(&self, local_addr: Ipv4Addr, local_port: u16) -> Result<SockID> {
@@ -121,6 +176,7 @@ impl TCP {
 
     /// Buffer のデータを送信する。MSS 以上のデータを送信すると、複数の TCP パケットに分割される
     /// 全て送信したら、ack を待たず return
+    /// TODO: 送信用スレッドで動く関数？
     pub fn send(&self, sock_id: SockID, buffer: &[u8]) -> Result<()> {
         let mut cursor = 0;
         while cursor < buffer.len() {
@@ -129,10 +185,31 @@ impl TCP {
             let mut socket = table
                 .get_mut(&sock_id)
                 .context(format!("no such socket: {:?}", sock_id))?;
-            let send_size = cmp::min(MSS, buffer.len() - cursor);
+
+            let mut send_size = cmp::min(
+                MSS,
+                cmp::min(socket.send_param.window as usize, buffer.len() - cursor),
+            );
+            // TODO: マイナスになることはないの？
+            while send_size == 0 {
+                dbg!("unable to slide send window");
+                // Remove locks, wait for events and allow receiving threads to aquire locks
+                drop(table);
+                self.wait_event(sock_id, TCPEventKind::Acked);
+                table = self.sockets.write().unwrap();
+                socket = table
+                    .get_mut(&sock_id)
+                    .context(format!("no such socket: {:?}", sock_id))?;
+
+                send_size = cmp::min(
+                    MSS,
+                    cmp::min(socket.send_param.window as usize, buffer.len() - cursor),
+                );
+            }
+            dbg!("current window size", socket.send_param.window);
 
             socket.send_tcp_packet(
-                // TODO: シーケンス番号は現在のパケットの先頭の番号、であってる？
+                // TODO: このシーケンス番号は現在のパケットの先頭の番号、であってる？
                 socket.send_param.next,
                 // NOTE: acknowledge number は接続先ソケットの unacknowledge sequence number にセットされる
                 // TODO: acknowledge number はこのパケットに対する返信の先頭のシーケンス番号、であってる？
@@ -142,6 +219,14 @@ impl TCP {
             )?;
             cursor += send_size;
             socket.send_param.next += send_size as u32;
+            // NOTE: この window って値元に戻らないの？マイナスされたまま？
+            // -> timer で ack されたセグメントをキューから削除する際に、window も更新する
+            socket.send_param.window = cmp::max(socket.send_param.window - send_size as u16, 0);
+
+            // This is unlocked for a short while and waits, allowing the receiving thread to receive ACKs
+            // Keep sending until send_window reaches 0, to reduce the probability of the transmission being blocked
+            drop(table);
+            thread::sleep(Duration::from_millis(1));
         }
         Ok(())
     }
@@ -221,6 +306,7 @@ impl TCP {
             if socket.send_param.unacked_seq > item.packet.get_seq() {
                 // ack されてるので除去
                 dbg!("successfully acked", item.packet.get_seq());
+                socket.send_param.window += item.packet.payload().len() as u16;
                 self.publish_event(socket.get_sock_id(), TCPEventKind::Acked);
             } else {
                 // ack されてない、キューに戻す
