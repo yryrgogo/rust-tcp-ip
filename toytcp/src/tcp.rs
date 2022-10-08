@@ -134,6 +134,7 @@ impl TCP {
             socket.send_tcp_packet(
                 // TODO: シーケンス番号は現在のパケットの先頭の番号、であってる？
                 socket.send_param.next,
+                // NOTE: acknowledge number は接続先ソケットの unacknowledge sequence number にセットされる
                 // TODO: acknowledge number はこのパケットに対する返信の先頭のシーケンス番号、であってる？
                 socket.recv_param.next,
                 tcpflags::ACK,
@@ -203,12 +204,28 @@ impl TCP {
                 TcpStatus::Listen => self.listen_handler(table, sock_id, &packet, remote_addr),
                 TcpStatus::SynRcvd => self.synrcvd_handler(table, sock_id, &packet),
                 TcpStatus::SynSent => self.synsent_handler(socket, &packet),
+                TcpStatus::Established => self.established_handler(socket, &packet),
                 _ => {
                     dbg!("not implemented state");
                     Ok(())
                 }
             } {
                 dbg!(error);
+            }
+        }
+    }
+
+    fn delete_acked_segment_from_retransmission_queue(&self, socket: &mut Socket) {
+        dbg!("ack accept", socket.send_param.unacked_seq);
+        while let Some(item) = socket.retransmission_queue.pop_front() {
+            if socket.send_param.unacked_seq > item.packet.get_seq() {
+                // ack されてるので除去
+                dbg!("successfully acked", item.packet.get_seq());
+                self.publish_event(socket.get_sock_id(), TCPEventKind::Acked);
+            } else {
+                // ack されてない、キューに戻す
+                socket.retransmission_queue.push_front(item);
+                break;
             }
         }
     }
@@ -321,6 +338,24 @@ impl TCP {
                     TCPEventKind::ConnectionCompleted,
                 );
             }
+        }
+        Ok(())
+    }
+
+    fn established_handler(&self, socket: &mut Socket, packet: &TCPPacket) -> Result<()> {
+        dbg!("established handler");
+        if socket.send_param.unacked_seq < packet.get_ack()
+            && packet.get_ack() <= socket.send_param.next
+        {
+            socket.send_param.unacked_seq = packet.get_ack();
+            self.delete_acked_segment_from_retransmission_queue(socket);
+        } else if socket.send_param.next < packet.get_ack() {
+            // 未送信セグメントに対する ack は破棄
+            return Ok(());
+        }
+        if packet.get_flag() & tcpflags::ACK == 0 {
+            // ACK が立っていないパケットは破棄
+            return Ok(());
         }
         Ok(())
     }
