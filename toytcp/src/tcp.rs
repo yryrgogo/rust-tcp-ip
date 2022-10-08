@@ -24,6 +24,26 @@ pub struct TCP {
     event_condvar: (Mutex<Option<TCPEvent>>, Condvar),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct TCPEvent {
+    sock_id: SockID, // イベント発生元のソケット ID
+    kind: TCPEventKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TCPEventKind {
+    ConnectionCompleted,
+    Acked,
+    DataArrived,
+    ConnectionClosed,
+}
+
+impl TCPEvent {
+    fn new(sock_id: SockID, kind: TCPEventKind) -> Self {
+        Self { sock_id, kind }
+    }
+}
+
 impl TCP {
     pub fn new() -> Arc<Self> {
         let sockets = RwLock::new(HashMap::new());
@@ -174,6 +194,31 @@ impl TCP {
             }
         }
         Ok(())
+    }
+
+    /// 指定した Socket ID と TCPEventKind に一致するイベントが発生するまで待機
+    fn wait_event(&self, sock_id: SockID, kind: TCPEventKind) {
+        let (lock, cvar) = &self.event_condvar;
+        let mut event = lock.lock().unwrap();
+        loop {
+            if let Some(ref e) = *event {
+                if e.sock_id == sock_id && e.kind == kind {
+                    break;
+                }
+            }
+            // cvar が notify されるまで event のロックを外して待機
+            event = cvar.wait(event).unwrap();
+        }
+        dbg!(&event);
+        *event = None;
+    }
+
+    /// 指定の Socket ID イベントを発行する
+    fn publish_event(&self, sock_id: SockID, kind: TCPEventKind) {
+        let (lock, cvar) = &self.event_condvar;
+        let mut e = lock.lock().unwrap();
+        *e = Some(TCPEvent::new(sock_id, kind));
+        cvar.notify_all();
     }
 }
 
