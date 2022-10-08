@@ -58,6 +58,33 @@ impl TCP {
         tcp
     }
 
+    pub fn listen(&self, local_addr: Ipv4Addr, local_port: u16) -> Result<SockID> {
+        // TODO: 接続先情報はいつ Socket にセットされる？
+        let socket = Socket::new(
+            local_addr,
+            UNDETERMINED_IP_ADDR, // まだ接続先 IP アドレスは未定
+            local_port,
+            UNDETERMINED_PORT, // まだ接続先ポート番号は未定
+            TcpStatus::Listen,
+        )?;
+        let mut lock = self.sockets.write().unwrap();
+        let sock_id = socket.get_sock_id();
+        lock.insert(sock_id, socket);
+        Ok(sock_id)
+    }
+
+    pub fn accept(&self, sock_id: SockID) -> Result<SockID> {
+        self.wait_event(sock_id, TCPEventKind::ConnectionCompleted);
+
+        let mut table = self.sockets.write().unwrap();
+        Ok(table
+            .get_mut(&sock_id)
+            .context(format!("no such socket: {:?}", sock_id))?
+            .connected_connection_queue
+            .pop_front()
+            .context("no connected socket")?)
+    }
+
     fn select_unused_port(&self, rng: &mut ThreadRng) -> Result<u16> {
         for _ in 0..(PORT_RANGE.end - PORT_RANGE.start) {
             let local_port = rng.gen_range(PORT_RANGE);
@@ -148,6 +175,8 @@ impl TCP {
             }
             let sock_id = socket.get_sock_id();
             if let Err(error) = match socket.status {
+                TcpStatus::Listen => self.listen_handler(table, sock_id, &packet, remote_addr),
+                TcpStatus::SynRcvd => self.synrcvd_handler(table, sock_id, &packet),
                 TcpStatus::SynSent => self.synsent_handler(socket, &packet),
                 _ => {
                     dbg!("not implemented state");
@@ -192,6 +221,48 @@ impl TCP {
                 )?;
                 dbg!("status: synsent ->", &socket.status);
             }
+        }
+        Ok(())
+    }
+
+    fn listen_handler(
+        &self,
+        mut table: RwLockWriteGuard<HashMap<SockID, Socket>>,
+        listening_socket_id: SockID,
+        packet: &TCPPacket,
+        remote_addr: Ipv4Addr,
+    ) -> Result<()> {
+        dbg!("listen handler");
+        if packet.get_flag() & tcpflags::ACK > 0 {
+            // 本来なら RST を send する
+            return Ok(());
+        }
+
+        let listening_socket = table.get_mut(&listening_socket_id).unwrap();
+        if packet.get_flag() & tcpflags::SYN > 0 {
+            let mut connection_socket = Socket::new(
+                listening_socket.local_addr,
+                remote_addr,
+                listening_socket.local_port,
+                packet.get_src(),
+                TcpStatus::SynRcvd,
+            )?;
+            connection_socket.recv_param.next = packet.get_seq() + 1;
+            connection_socket.recv_param.initial_seq = packet.get_seq();
+            connection_socket.send_param.initial_seq = rand::thread_rng().gen_range(1..1 << 31);
+            connection_socket.send_param.window = packet.get_window_size();
+            connection_socket.send_tcp_packet(
+                connection_socket.send_param.initial_seq,
+                connection_socket.recv_param.next,
+                tcpflags::SYN | tcpflags::ACK,
+                &[],
+            )?;
+            connection_socket.send_param.next = connection_socket.send_param.initial_seq + 1;
+            connection_socket.send_param.unacked_seq = connection_socket.send_param.initial_seq;
+            // TODO: なぜ listening_socket_id を保持するのか？どの Listening Socket で待機していたかを知る必要がある？
+            connection_socket.listening_socket = Some(listening_socket.get_sock_id());
+            dbg!("status: listen ->", &connection_socket.status);
+            table.insert(connection_socket.get_sock_id(), connection_socket);
         }
         Ok(())
     }
