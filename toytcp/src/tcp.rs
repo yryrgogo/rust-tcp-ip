@@ -156,7 +156,6 @@ impl TCP {
                 packet.get_dest(),
                 packet.get_src(),
             )) {
-                // TODO: Listening Socket とは？
                 Some(socket) => socket, // 接続済みソケット
                 None => match table.get_mut(&SockID(
                     local_addr,
@@ -259,10 +258,43 @@ impl TCP {
             )?;
             connection_socket.send_param.next = connection_socket.send_param.initial_seq + 1;
             connection_socket.send_param.unacked_seq = connection_socket.send_param.initial_seq;
-            // TODO: なぜ listening_socket_id を保持するのか？どの Listening Socket で待機していたかを知る必要がある？
+            // NOTE: なぜ listening_socket_id を保持するのか？どの Listening Socket で待機していたかを知る必要がある？
+            // -> syncrcvd_handler で接続が確立したとき、Listening Socket の queue に接続完了した Socket ID を追加するため
             connection_socket.listening_socket = Some(listening_socket.get_sock_id());
             dbg!("status: listen ->", &connection_socket.status);
             table.insert(connection_socket.get_sock_id(), connection_socket);
+        }
+        Ok(())
+    }
+
+    fn synrcvd_handler(
+        &self,
+        mut table: RwLockWriteGuard<HashMap<SockID, Socket>>,
+        sock_id: SockID,
+        packet: &TCPPacket,
+    ) -> Result<()> {
+        dbg!("synrcvd handler");
+        let socket = table.get_mut(&sock_id).unwrap();
+
+        if packet.get_flag() & tcpflags::ACK > 0
+            && socket.send_param.unacked_seq <= packet.get_ack()
+            && packet.get_ack() <= socket.send_param.next
+        {
+            // TODO: packet.get_seq() の値は現在のシーケンス番号でなく、次に送られてくるパケットのシーケンス番号になってる？
+            socket.recv_param.next = packet.get_seq();
+            socket.send_param.unacked_seq = packet.get_ack();
+            socket.status = TcpStatus::Established;
+            dbg!("status: synrcvd ->", &socket.status);
+            if let Some(id) = socket.listening_socket {
+                let listening_socket = table.get_mut(&id).unwrap();
+                listening_socket
+                    .connected_connection_queue
+                    .push_back(sock_id);
+                self.publish_event(
+                    listening_socket.get_sock_id(),
+                    TCPEventKind::ConnectionCompleted,
+                );
+            }
         }
         Ok(())
     }
