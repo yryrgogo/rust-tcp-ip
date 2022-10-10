@@ -23,6 +23,7 @@ pub struct Socket {
     pub send_param: SendParam,
     pub recv_param: RecvParam,
     pub status: TcpStatus,
+    pub recv_buffer: Vec<u8>,
     pub retransmission_queue: VecDeque<RetransmissionQueueEntry>,
     pub connected_connection_queue: VecDeque<SockID>, // Connected Socket を保持するキュー。Listening Socket のみ使用
     pub listening_socket: Option<SockID>, // 生成元の Listening Socket。Connected Socket のみ使用
@@ -120,6 +121,7 @@ impl Socket {
                 tail: 0,
             },
             status,
+            recv_buffer: vec![0; SOCKET_BUFFER_SIZE],
             connected_connection_queue: VecDeque::new(),
             retransmission_queue: VecDeque::new(),
             listening_socket: None,

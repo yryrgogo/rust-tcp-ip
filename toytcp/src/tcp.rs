@@ -231,6 +231,78 @@ impl TCP {
         Ok(())
     }
 
+    /// Reads data into the buffer and returns the size read. Returns 0 if FIN is received.
+    /// Block thread until packet is received.
+    /// buffer is temp buffer for reading data. It is not used for storing data.
+    pub fn recv(&self, sock_id: SockID, buffer: &mut [u8]) -> Result<usize> {
+        let mut table = self.sockets.write().unwrap();
+        let mut socket = table
+            .get_mut(&sock_id)
+            .context(format!("no such socket: {:?}", sock_id))?;
+        // recv_param.window は recv_buffer のサイズ。よって received_size は最初は 0 になる
+        let mut received_size = socket.recv_buffer.len() - socket.recv_param.window as usize;
+
+        // if the socket receive buffer size is exceeded, wait until the receive buffer is freed
+        while received_size == 0 {
+            // Unlock and wait for events to allow the receiving thread to acquire the lock
+            drop(table);
+            dbg!("waiting incoming data");
+            self.wait_event(sock_id, TCPEventKind::DataArrived);
+            table = self.sockets.write().unwrap();
+            socket = table
+                .get_mut(&sock_id)
+                .context(format!("no such socket: {:?}", sock_id))?;
+            // If the thread receives a DataArrivedEvent, the socket buffer size is guaranteed to be greater than 0
+            received_size = socket.recv_buffer.len() - socket.recv_param.window as usize;
+        }
+        // buffer が足りない場合、次の recv() で残りを読み込む。recv は loop の中で実行されているため、イベントの発火は不要
+        let copy_size = cmp::min(buffer.len(), received_size);
+        buffer[..copy_size].copy_from_slice(&socket.recv_buffer[..copy_size]);
+        socket.recv_buffer.copy_within(copy_size.., 0);
+        // buffer が足りなくて copy_size < received_size だった場合、(receive_buffer.len() - socket.recv_param.window) > 0 となるため、再度の DataArrived は wait せず、残りのデータを読み込みにいく
+        socket.recv_param.window += copy_size as u16;
+        Ok(copy_size)
+    }
+
+    pub fn close(&self, sock_id: SockID) -> Result<()> {
+        let mut table = self.sockets.write().unwrap();
+        let mut socket = table
+            .get_mut(&sock_id)
+            .context(format!("no such socket: {:?}", sock_id))?;
+        socket.send_tcp_packet(
+            socket.send_param.next,
+            socket.recv_param.next,
+            tcpflags::FIN | tcpflags::ACK,
+            &[],
+        )?;
+        socket.send_param.next += 1;
+        match socket.status {
+            TcpStatus::Established => {
+                socket.status = TcpStatus::FinWait1;
+                drop(table);
+                self.wait_event(sock_id, TCPEventKind::ConnectionClosed);
+
+                let mut table = self.sockets.write().unwrap();
+                table.remove(&sock_id);
+                dbg!("closed & removed", sock_id);
+            }
+            TcpStatus::CloseWait => {
+                socket.status = TcpStatus::LastAck;
+                drop(table);
+                self.wait_event(sock_id, TCPEventKind::ConnectionClosed);
+
+                let mut table = self.sockets.write().unwrap();
+                table.remove(&sock_id);
+                dbg!("closed & removed", sock_id);
+            }
+            TcpStatus::Listen => {
+                table.remove(&sock_id);
+            }
+            _ => return Ok(()),
+        }
+        Ok(())
+    }
+
     fn receive_handler(&self) -> Result<()> {
         dbg!("begin recv thread");
         let (_, mut receiver) = transport::transport_channel(
@@ -290,6 +362,8 @@ impl TCP {
                 TcpStatus::SynRcvd => self.synrcvd_handler(table, sock_id, &packet),
                 TcpStatus::SynSent => self.synsent_handler(socket, &packet),
                 TcpStatus::Established => self.established_handler(socket, &packet),
+                TcpStatus::CloseWait | TcpStatus::LastAck => self.close_handler(socket, &packet),
+                TcpStatus::FinWait1 | TcpStatus::FinWait2 => self.finwait_handler(socket, &packet),
                 _ => {
                     dbg!("not implemented state");
                     Ok(())
@@ -396,6 +470,7 @@ impl TCP {
         Ok(())
     }
 
+    // Passive Open
     fn synrcvd_handler(
         &self,
         mut table: RwLockWriteGuard<HashMap<SockID, Socket>>,
@@ -409,8 +484,9 @@ impl TCP {
             && socket.send_param.unacked_seq <= packet.get_ack()
             && packet.get_ack() <= socket.send_param.next
         {
-            // TODO: packet.get_seq() の値は現在のシーケンス番号でなく、次に送られてくるパケットのシーケンス番号になってる？
+            // Passive Open の際に Active Open する側から送られてくるパケットのシーケンス番号は、最初のパケットのシーケンス番号になっている（Three-Way Handshake の Active Open 側の ACK パケットはシーケンス番号にプラスされない？）
             socket.recv_param.next = packet.get_seq();
+            // Passive Open で最初に受け取る Acknowledge Number はシーケンス番号+1
             socket.send_param.unacked_seq = packet.get_ack();
             socket.status = TcpStatus::Established;
             dbg!("status: synrcvd ->", &socket.status);
@@ -443,7 +519,78 @@ impl TCP {
             // ACK が立っていないパケットは破棄
             return Ok(());
         }
+        if !packet.payload().is_empty() {
+            self.process_payload(socket, &packet)?;
+        }
         Ok(())
+    }
+
+    /// TODO: 各パラメータの意味を理解する
+    fn process_payload(&self, socket: &mut Socket, packet: &TCPPacket) -> Result<()> {
+        // 受信待ちの状態でパケットが送られてきた段階なら、socket.recv_param.next は packet.get_seq() と同じ値になっているはず？
+        // パケット受信後に、そのパケットの次に受け取るべきシーケンス番号を socket.recv_param.next にセットしているなら、offset はマイナスになる
+        // packet.get_seq() > socket.recv_param.next はありえない。packet.get_seq() の方が大きいと、途中のパケットが抜けてるから
+        // socket.recv_param.window の初期値 = recv_buffer.len()
+        // オフセットは、パケットが分割して送られてきて、到着した順序が正しくない場合に、受信バッファのどこにセットするかを決めるために使う
+        // TODO: (packet.get_seq() - socket.recv_param.next) の必要性が不明。この値がプラスになるとき、マイナスになる時はどんな時か？そもそもあり得るのか？は、各ケースの状態を一つ一つ書き出してみないとわからない
+        let offset = socket.recv_buffer.len() - socket.recv_param.window as usize
+            + (packet.get_seq() - socket.recv_param.next) as usize;
+
+        // TODO: 受け取った payload 分の buffer が残ってなかったとき、buffer に入りきらなかった分はどうなるか？
+        // TODO: packet.payload の copy_size 以降を前に持ってくるという操作はどこにもないため、取り出せないのでは？そもそも MSS < RECEIVE_BUFFER_SIZE という前提がある？（普通そうだと思うが）
+        let copy_size = cmp::min(packet.payload().len(), socket.recv_buffer.len() - offset);
+
+        // ソケットの受信バッファへの書き込みはここで行われる
+        // payload の中身にアクセスするのはここのみ
+        socket.recv_buffer[offset..offset + copy_size]
+            .copy_from_slice(&packet.payload()[..copy_size]);
+
+        // TODO: わからん -> ロス再送の際に穴埋めされるため max をとる
+        // TODO: 具体のユースケースを元に考える必要がある
+        socket.recv_param.tail =
+            cmp::max(socket.recv_param.tail, packet.get_seq() + copy_size as u32);
+
+        if packet.get_seq() == socket.recv_param.next {
+            // 順序入れ替わりなしの場合のみ recv_param.next を進められる
+            socket.recv_param.next = socket.recv_param.tail;
+            // TODO: 受け取ったパケットのサイズ分だけ window を減らす
+            socket.recv_param.window -= (socket.recv_param.tail - packet.get_seq()) as u16;
+        }
+
+        if copy_size > 0 {
+            // Successfully copied to receive buffer
+            socket.send_tcp_packet(
+                socket.send_param.next,
+                socket.recv_param.next,
+                tcpflags::ACK,
+                &[],
+            )?;
+        } else {
+            // When the receive buffer overflows, the segment is discarded
+            dbg!("recv buffer overflow");
+        }
+        self.publish_event(socket.get_sock_id(), TCPEventKind::DataArrived);
+        Ok(())
+    }
+
+    fn finwait_handler(&self, socket: &mut Socket, packet: &TCPPacket) -> Result<()> {
+        dbg!("finwait handler");
+        if socket.send_param.unacked_seq < packet.get_ack()
+            && packet.get_ack() <= socket.send_param.next
+        {
+            socket.send_param.unacked_seq = packet.get_ack();
+            self.delete_acked_segment_from_retransmission_queue(socket);
+        } else if socket.send_param.next < packet.get_ack() {
+            // 未送信セグメントに対する ACK は破棄
+            return Ok(());
+        }
+        if packet.get_flag() & tcpflags::ACK == 0 {
+            // ACK が立っていないパケットは破棄
+            return Ok(());
+        }
+        if !packet.payload().is_empty() {
+            self.process_payload(socket, &packet)?;
+        }
     }
 
     /// 指定した Socket ID と TCPEventKind に一致するイベントが発生するまで待機
