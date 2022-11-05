@@ -1,17 +1,17 @@
-#include <string.h>
+#include "log.h"
+#include "net.h"
+#include <arpa/inet.h>
 #include <cstdint>
 #include <fcntl.h>
 #include <ifaddrs.h>
 #include <iostream>
-#include <unistd.h>
+#include <linux/if_ether.h>
 #include <net/if.h>
 #include <netpacket/packet.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
-#include <arpa/inet.h>
-#include <linux/if_ether.h>
-#include "log.h"
-#include "net.h"
+#include <unistd.h>
 
 /**
  * 無視するネットワークインターフェースたち
@@ -22,6 +22,11 @@
 	{                                          \
 		"lo", "bond0", "dummy0", "tunl0", "sit0" \
 	}
+
+#define ETHER_TYPE_IP 0x0800
+#define ETHER_TYPE_ARP 0x0806
+#define ETHER_TYPE_IPV6 0x86dd
+
 bool is_ignore_interface(const char *ifname)
 {
 	char ignore_interfaces[][IF_NAMESIZE] = IGNORE_INTERFACES;
@@ -136,10 +141,11 @@ int main()
 			next = net_dev_list;
 			net_dev_list = dev;
 			dev->next = next;
-			// set non-blocking
-			// get File descriptor falg
+
+			// set non blocking
+			// get File descriptor flag
 			int val = fcntl(sock, F_GETFL, 0);
-			// set Non blocking bit
+			// set non blocking bit
 			fcntl(sock, F_SETFL, val | O_NONBLOCK);
 		}
 	}
@@ -208,5 +214,9 @@ int net_device_poll(net_device *dev)
 		printf("%02x", recv_buffer[i]);
 	}
 	printf("\n");
+
+	// send received data to ethernet layer
+	ethernet_input(dev, recv_buffer, n);
+
 	return 0;
 }
