@@ -1,3 +1,4 @@
+#include "ethernet.h"
 #include "log.h"
 #include "net.h"
 #include <arpa/inet.h>
@@ -12,20 +13,6 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
-
-/**
- * 無視するネットワークインターフェースたち
- * 中には、MAC アドレスを持たないものなど、
- * このプログラムで使うとエラーを引き起こすものもある
- */
-#define IGNORE_INTERFACES                    \
-	{                                          \
-		"lo", "bond0", "dummy0", "tunl0", "sit0" \
-	}
-
-#define ETHER_TYPE_IP 0x0800
-#define ETHER_TYPE_ARP 0x0806
-#define ETHER_TYPE_IPV6 0x86dd
 
 bool is_ignore_interface(const char *ifname)
 {
