@@ -1,4 +1,4 @@
-#include <iostream>>
+#include <iostream>
 
 #define IP_ADDRESS_LEN 4
 #define IP_ADDRESS(A, B, C, D) (A * 0x1000000u + B * 0x10000 + C * 0x100 + D)
@@ -31,6 +31,8 @@ struct ip_device
 	uint32_t netmask = 0;
 	uint32_t broadcast = 0;
 };
+
+struct net_device;
 
 bool in_subnet(uint32_t subnet_prefix, uint32_t subnet_mask, uint32_t target_address);
 

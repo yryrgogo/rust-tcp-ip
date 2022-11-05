@@ -1,4 +1,5 @@
-#include <cstdint>
+#include <cstdio>
+#include "net.h"
 
 /**
  * 無視するネットワークインターフェースたち

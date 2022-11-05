@@ -1,8 +1,8 @@
 #include "ethernet.h"
+#include "ip.h"
 #include "log.h"
 #include "net.h"
 #include "utils.h"
-#include <arpa/inet.h>
 #include <cstddef>
 #include <malloc.h>
 #include <string.h>
