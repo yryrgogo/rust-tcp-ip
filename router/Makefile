@@ -1,6 +1,6 @@
 #!/bin/make
 OUTDIR = ./build
-TARGET = $(OUTDIR)/curo
+TARGET = $(OUTDIR)/router
 SOURCES = $(wildcard *.cpp)
 OBJECTS = $(addprefix $(OUTDIR)/, $(SOURCES:.cpp=.o))
 
@@ -13,7 +13,7 @@ clean:
 
 .PHONY: run
 run: $(TARGET)
-	./build/curo
+	./build/router
 
 $(TARGET): $(OBJECTS) Makefile
 	$(CXX) -o $(TARGET) $(OBJECTS)

@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstddef>
+#include "ip.h"
 
 struct net_device;
 
@@ -9,14 +10,13 @@ struct net_device_ops
 	int (*poll)(net_device *dev);
 };
 
-struct ip_device;
-
 struct net_device
 {
 	char name[32];
 	uint8_t mac_addr[6];
 	net_device_ops ops;
 	net_device *next;
+	ip_device *ip_dev;
 	uint8_t data[];
 };
 

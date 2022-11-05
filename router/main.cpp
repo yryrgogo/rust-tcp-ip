@@ -1,11 +1,13 @@
 #include "ethernet.h"
+#include "ip.h"
 #include "log.h"
 #include "net.h"
-#include <arpa/inet.h>
+#include "utils.h"
 #include <cstdint>
 #include <fcntl.h>
 #include <ifaddrs.h>
 #include <iostream>
+#include <termios.h>
 #include <linux/if_ether.h>
 #include <net/if.h>
 #include <netpacket/packet.h>
@@ -13,6 +15,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include "config.h"
 
 bool is_ignore_interface(const char *ifname)
 {
@@ -36,6 +39,22 @@ net_device *get_net_device_by_name(const char *name)
 			return dev;
 	}
 	return nullptr;
+}
+
+/**
+ * set ip config to net device
+ */
+void configure_ip()
+{
+	configure_ip_address(
+			get_net_device_by_name("router1-host1"),
+			IP_ADDRESS(192, 168, 1, 1),
+			IP_ADDRESS(255, 255, 255, 0));
+
+	configure_ip_address(
+			get_net_device_by_name("router1-router2"),
+			IP_ADDRESS(192, 168, 0, 1),
+			IP_ADDRESS(255, 255, 255, 0));
 }
 
 int net_device_transmit(struct net_device *dev, uint8_t *buffer, size_t len);
@@ -144,14 +163,42 @@ int main()
 		exit(EXIT_FAILURE);
 	}
 
+	configure_ip();
+
+	// 入力時にバッファリングせず、すぐに入力を受け取るための設定
+	termios attr{};
+	tcgetattr(0, &attr);
+	attr.c_lflag &= ~ICANON;
+	attr.c_cc[VTIME] = 0;
+	attr.c_cc[VMIN] = 1;
+	tcsetattr(0, TCSANOW, &attr);
+	fcntl(0, F_SETFL, 0_NONBLOCK); // 標準入力にノンブロッキングの設定
+
 	while (true)
 	{
+		int input = getchar(); // 入力を受け取る
+		if (input != -1)
+		{
+			// 入力があったら
+			printf("\n");
+			if (input == 'a')
+			{
+				dump_arp_table_entry();
+			}
+			else if (input == 'q')
+			{
+				break;
+			}
+		}
+
 		// poll communication from device
 		for (net_device *dev = net_dev_list; dev; dev = dev->next)
 		{
 			dev->ops.poll(dev);
 		}
 	}
+
+	printf("Goodbye!\n");
 	return 0;
 }
 
@@ -206,4 +253,22 @@ int net_device_poll(net_device *dev)
 	ethernet_input(dev, recv_buffer, n);
 
 	return 0;
+}
+
+/**
+ * find net_device by name
+ * @param name name of net_device
+ * @return net_device
+ */
+net_device *get_net_device_by_name(const char *name)
+{
+	net_device *dev;
+	for (dev = net_dev_list; dev; dev = dev->next)
+	{
+		if (strcmp(dev->name, name) == 0)
+		{
+			return dev;
+		}
+	}
+	return nullptr;
 }
