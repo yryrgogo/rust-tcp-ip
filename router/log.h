@@ -1,0 +1,18 @@
+#define LOG_ETHERNET(...) \
+	printf("[ETHER] ");     \
+	printf(__VA_ARGS__)
+#define LOG_IP(...) \
+	printf("[IP] ");  \
+	printf(__VA_ARGS__);
+#define LOG_ARP(...) \
+	printf("[ARP] ");  \
+	printf(__VA_ARGS__);
+#define LOG_ICMP(...) \
+	printf("[ICMP] ");  \
+	printf(__VA_ARGS__);
+#define LOG_NAT(...) \
+	printf("[NAT] ");  \
+	printf(__VA_ARGS__);
+#define LOG_ERROR(...) \
+	printf("[ERROR] ");  \
+	printf(__VA_ARGS__);
