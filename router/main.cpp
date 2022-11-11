@@ -30,13 +30,20 @@ bool is_ignore_interface(const char *ifname)
 	return false;
 }
 
+/**
+ * find net_device by name
+ * @param name name of net_device
+ * @return net_device
+ */
 net_device *get_net_device_by_name(const char *name)
 {
 	net_device *dev;
 	for (dev = net_dev_list; dev; dev = dev->next)
 	{
 		if (strcmp(dev->name, name) == 0)
+		{
 			return dev;
+		}
 	}
 	return nullptr;
 }
@@ -172,7 +179,7 @@ int main()
 	attr.c_cc[VTIME] = 0;
 	attr.c_cc[VMIN] = 1;
 	tcsetattr(0, TCSANOW, &attr);
-	fcntl(0, F_SETFL, 0_NONBLOCK); // 標準入力にノンブロッキングの設定
+	fcntl(0, F_SETFL, O_NONBLOCK); // 標準入力にノンブロッキングの設定
 
 	while (true)
 	{
@@ -183,7 +190,7 @@ int main()
 			printf("\n");
 			if (input == 'a')
 			{
-				dump_arp_table_entry();
+				// dump_arp_table_entry();
 			}
 			else if (input == 'q')
 			{
@@ -253,22 +260,4 @@ int net_device_poll(net_device *dev)
 	ethernet_input(dev, recv_buffer, n);
 
 	return 0;
-}
-
-/**
- * find net_device by name
- * @param name name of net_device
- * @return net_device
- */
-net_device *get_net_device_by_name(const char *name)
-{
-	net_device *dev;
-	for (dev = net_dev_list; dev; dev = dev->next)
-	{
-		if (strcmp(dev->name, name) == 0)
-		{
-			return dev;
-		}
-	}
-	return nullptr;
 }

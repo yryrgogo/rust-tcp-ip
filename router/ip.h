@@ -1,3 +1,6 @@
+#ifndef CURO_IP_H
+#define CURO_IP_H
+
 #include <iostream>
 
 #define IP_ADDRESS_LEN 4
@@ -43,3 +46,5 @@ void ip_input_to_ours(net_device *input_dev, ip_header *ip_packet, size_t len);
 struct my_buf;
 
 void ip_encapsulate_output(uint32_t dest_addr, uint32_t src_addr, my_buf *payload_mybuf, uint8_t protocol_num);
+
+#endif // CURO_IP_H

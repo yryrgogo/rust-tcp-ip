@@ -1,3 +1,6 @@
+#ifndef CURO_ETHERNET_H
+#define CURO_ETHERNET_H
+
 #include <cstdio>
 #include "net.h"
 
@@ -29,3 +32,5 @@ struct ethernet_header
 } __attribute__((packed));
 
 void ethernet_input(net_device *dev, uint8_t *buffer, ssize_t len);
+
+#endif // CURO_ETHERNET_H

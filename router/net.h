@@ -1,3 +1,6 @@
+#ifndef CURO_NET_H
+#define CURO_NET_H
+
 #include <cstdint>
 #include <cstddef>
 
@@ -21,3 +24,5 @@ struct net_device
 };
 
 extern net_device *net_dev_list;
+
+#endif // CURO_NET_H
