@@ -1,7 +1,20 @@
 #include "ip.h"
 #include "log.h"
+#include "my_buf.h"
 #include "net.h"
 #include "utils.h"
+
+/**
+ * Subnet に IP アドレスが含まれているか比較
+ * @param subnet_prefix
+ * @param subnet_mask
+ * @param target_address
+ * @return
+ */
+bool in_subnet(uint32_t subnet_prefix, uint32_t subnet_mask, uint32_t target_address)
+{
+	return ((target_address & subnet_mask) == (subnet_prefix & subnet_mask));
+}
 
 /**
  * receive process for IP packet
@@ -82,5 +95,59 @@ void ip_input_to_ours(net_device *input_dev, ip_header *ip_packet, size_t len)
 	default:
 		LOG_IP("Unhandled ip protocol %04x", ip_packet->protocol);
 		return;
+	}
+}
+
+/**
+ * IP パケットにカプセル化して送信
+ * @param dest_addr 送信先の IP アドレス
+ * @param src_addr 送信元の IP アドレス
+ * @param payload_mybuf 包んで送信する my_buf 構造体の先頭
+ * @param protocol_num IP プロトコル番号
+ */
+void ip_encapsulate_output(uint32_t dest_addr, uint32_t src_addr, my_buf *payload_mybuf, uint8_t protocol_num)
+{
+	// 連結リストを辿って、IP ヘッダで必要な IP パケットの全長を算出する
+	uint16_t total_len = 0;
+	my_buf *current = payload_mybuf;
+	while (current != nullptr)
+	{
+		total_len += current->len;
+		current = current->next;
+	}
+
+	// IP ヘッダ用のバッファを確保する
+	my_buf *ip_mybuf = my_buf::create(IP_HEADER_SIZE);
+	// 包んで送るデータにヘッダとして連結する
+	payload_mybuf->add_header(ip_mybuf);
+
+	// IP ヘッダの各項目を設定
+	auto *ip_buf = reinterpret_cast<ip_header *>(ip_mybuf->buffer);
+	ip_buf->version = 4;
+	ip_buf->header_len = sizeof(ip_header) >> 2;
+	ip_buf->tos = 0;
+	ip_buf->total_len = htons(sizeof(ip_header) + total_len);
+	ip_buf->protocol = protocol_num;
+
+	static uint16_t id = 0;
+	ip_buf->identify = id++;
+	ip_buf->frag_offset = 0;
+	ip_buf->ttl = 0xff;
+	ip_buf->header_checksum = 0;
+	ip_buf->dest_addr = htonl(dest_addr);
+	ip_buf->src_addr = htonl(src_addr);
+	ip_buf->header_checksum = checksum_16(reinterpret_cast<uint16_t *>(ip_mybuf->buffer), ip_mybuf->len, 0);
+
+	for (net_device *dev = net_dev_list; dev; dev = dev->next)
+	{
+		if (dev->ip_dev == nullptr or dev->ip_dev->address == IP_ADDRESS(0, 0, 0, 0))
+		{
+			continue;
+		}
+
+		if (in_subnet(dev->ip_dev->address, dev->ip_dev->netmask, dest_addr))
+		{
+			// TODO: イーサネットアドレスを特定して送信
+		}
 	}
 }
