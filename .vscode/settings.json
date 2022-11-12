@@ -2,5 +2,10 @@
 	"cSpell.words": [
 		"tcpflags",
 		"veth"
-	]
+	],
+	"files.associations": {
+		"*.py": "python",
+		"*.tfvars": "terraform",
+		"cstring": "cpp"
+	}
 }

@@ -33,4 +33,9 @@ struct ethernet_header
 
 void ethernet_input(net_device *dev, uint8_t *buffer, ssize_t len);
 
+struct my_buf;
+
+void ethernet_encapsulate_output(
+		net_device *dev, const uint8_t *dest_addr, my_buf *payload_mybuf, uint16_t ether_type);
+
 #endif // CURO_ETHERNET_H
