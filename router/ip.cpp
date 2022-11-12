@@ -1,3 +1,5 @@
+#include "arp.h"
+#include "ethernet.h"
 #include "ip.h"
 #include "log.h"
 #include "my_buf.h"
@@ -147,7 +149,16 @@ void ip_encapsulate_output(uint32_t dest_addr, uint32_t src_addr, my_buf *payloa
 
 		if (in_subnet(dev->ip_dev->address, dev->ip_dev->netmask, dest_addr))
 		{
-			// TODO: イーサネットアドレスを特定して送信
+			arp_table_entry *entry;
+			entry = search_arp_table_entry(dest_addr);
+			if (entry == nullptr)
+			{
+				LOG_IP("Trying ip output, but no arp record to %s\n", ip_htoa(dest_addr));
+				send_arp_request(dev, dest_addr);
+				my_buf::my_buf_free(payload_mybuf, true);
+				return;
+			}
+			ethernet_encapsulate_output(dev, entry->mac_addr, ip_mybuf, ETHER_TYPE_IP);
 		}
 	}
 }

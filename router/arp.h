@@ -35,4 +35,12 @@ struct arp_table_entry
 	arp_table_entry *next;
 };
 
+void add_arp_table_entry(net_device *dev, uint8_t *mac_addr, uint32_t ip_addr);
+
+arp_table_entry *search_arp_table_entry(uint32_t ip_addr);
+
+void dump_arp_table_entry();
+
+void send_arp_request(net_device *dev, uint32_t ip_addr);
+
 #endif // CURO_ARP_H

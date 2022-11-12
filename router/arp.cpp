@@ -184,3 +184,16 @@ void arp_reply_arrives(net_device *dev, arp_ip_to_ethernet *reply)
 	// ARP Table エントリの追加
 	add_arp_table_entry(dev, reply->sha, ntohl(reply->spa));
 }
+
+arp_table_entry *search_arp_table_entry(uint32_t ip_addr)
+{
+	for (auto &entry : arp_table)
+	{
+		if (entry.ip_addr == ip_addr)
+		{
+			return &entry;
+		}
+	}
+
+	return nullptr;
+}
