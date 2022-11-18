@@ -1,5 +1,6 @@
 #include "arp.h"
 #include "ethernet.h"
+#include "icmp.h"
 #include "ip.h"
 #include "log.h"
 #include "my_buf.h"
@@ -88,8 +89,10 @@ void ip_input_to_ours(net_device *input_dev, ip_header *ip_packet, size_t len)
 	switch (ip_packet->protocol)
 	{
 	case IP_PROTOCOL_NUM_ICMP:
-		LOG_IP("ICMP received!\n");
-		return;
+		return icmp_input(
+				ntohl(ip_packet->src_addr),
+				ntohl(ip_packet->dest_addr),
+				((uint8_t *)ip_packet) + IP_HEADER_SIZE, len - IP_HEADER_SIZE);
 	case IP_PROTOCOL_NUM_UDP:
 		return;
 	case IP_PROTOCOL_NUM_TCP:
