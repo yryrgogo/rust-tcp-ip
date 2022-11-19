@@ -1,4 +1,5 @@
 #include "ethernet.h"
+#include "arp.h"
 #include "ip.h"
 #include "log.h"
 #include "my_buf.h"
@@ -30,12 +31,12 @@ void ethernet_input(net_device *dev, uint8_t *buffer, ssize_t len)
 	// イーサタイプの値から上位プロトコルを特定する
 	switch (ether_type)
 	{
-	// case ETHER_TYPE_ARP:
-	// 	// Ethernet ヘッダを外して ARP 処理へ
-	// 	return arp_input(
-	// 			dev,
-	// 			buffer + ETHERNET_HEADER_SIZE,
-	// 			len - ETHERNET_HEADER_SIZE);
+	case ETHER_TYPE_ARP:
+		// Ethernet ヘッダを外して ARP 処理へ
+		return arp_input(
+				dev,
+				buffer + ETHERNET_HEADER_SIZE,
+				len - ETHERNET_HEADER_SIZE);
 	case ETHER_TYPE_IP:
 		// Ethernet ヘッダを外して IP 処理へ
 		return ip_input(

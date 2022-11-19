@@ -18,14 +18,14 @@ struct ip_header
 	uint8_t header_len : 4;
 	uint8_t version : 4;
 	uint8_t tos;
-	uint8_t total_len;
-	uint8_t identify;
-	uint8_t frag_offset;
+	uint16_t total_len;
+	uint16_t identify;
+	uint16_t frag_offset;
 	uint8_t ttl;
 	uint8_t protocol;
-	uint8_t header_checksum;
-	uint8_t src_addr;
-	uint8_t dest_addr;
+	uint16_t header_checksum;
+	uint32_t src_addr;
+	uint32_t dest_addr;
 } __attribute__((packed));
 
 struct ip_device

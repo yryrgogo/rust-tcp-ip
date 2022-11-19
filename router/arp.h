@@ -43,4 +43,6 @@ void dump_arp_table_entry();
 
 void send_arp_request(net_device *dev, uint32_t ip_addr);
 
+void arp_input(net_device *input_dev, uint8_t *buffer, ssize_t len);
+
 #endif // CURO_ARP_H
