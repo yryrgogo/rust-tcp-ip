@@ -94,6 +94,11 @@ void ip_input_to_ours(net_device *input_dev, ip_header *ip_packet, size_t len)
 				ntohl(ip_packet->dest_addr),
 				((uint8_t *)ip_packet) + IP_HEADER_SIZE, len - IP_HEADER_SIZE);
 	case IP_PROTOCOL_NUM_UDP:
+		send_icmp_destination_unreachable(
+				ntohl(ip_packet->src_addr),
+				input_dev->ip_dev->address,
+				ICMP_DESTINATION_UNREACHABLE_CODE_PORT_UNREACHABLE,
+				ip_packet, len);
 		return;
 	case IP_PROTOCOL_NUM_TCP:
 		return;
