@@ -62,6 +62,11 @@ void configure_ip()
 			get_net_device_by_name("router1-router2"),
 			IP_ADDRESS(192, 168, 0, 1),
 			IP_ADDRESS(255, 255, 255, 0));
+
+	configure_ip_net_route(
+			IP_ADDRESS(192, 168, 2, 0),
+			24,
+			IP_ADDRESS(192, 168, 0, 2));
 }
 
 int net_device_transmit(struct net_device *dev, uint8_t *buffer, size_t len);
@@ -169,6 +174,8 @@ int main()
 		LOG_ERROR("No interface is enabled\n");
 		exit(EXIT_FAILURE);
 	}
+
+	ip_fib = (binary_trie_node<ip_route_entry> *)calloc(1, sizeof(binary_trie_node<ip_route_entry>));
 
 	configure_ip();
 

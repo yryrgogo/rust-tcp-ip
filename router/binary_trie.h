@@ -1,4 +1,9 @@
-#define IP_BIT_LEN ;
+#ifndef CURO_BINARY_TRIE_H
+#define CURO_BINARY_TRIE_H
+
+#include <iostream>
+
+#define IP_BIT_LEN 32
 
 template <typename DATA_TYPE>
 struct binary_trie_node
@@ -90,4 +95,8 @@ DATA_TYPE *binary_trie_search(binary_trie_node<DATA_TYPE> *root, uint32_t prefix
 			current = current->node_0;
 		}
 	}
+
+	return result;
 }
+
+#endif

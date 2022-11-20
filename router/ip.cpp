@@ -7,6 +7,8 @@
 #include "net.h"
 #include "utils.h"
 
+binary_trie_node<ip_route_entry> *ip_fib;
+
 /**
  * Subnet に IP アドレスが含まれているか比較
  * @param subnet_prefix
@@ -74,6 +76,45 @@ void ip_input(net_device *input_dev, uint8_t *buffer, ssize_t len)
 				// 自分宛の通信として処理
 				return ip_input_to_ours(dev, ip_packet, len);
 			}
+	}
+
+	// 宛先 IP アドレスがルータの持っている IP アドレスでない場合はフォワーディングを行う
+	ip_route_entry *route = binary_trie_search(ip_fib, ntohl(ip_packet->dest_addr));
+	if (route == nullptr)
+	{
+		LOG_IP("[input] No route to %s\n", ip_htoa(ntohl(ip_packet->dest_addr)));
+		// Drop packet
+		return;
+	}
+
+	if (ip_packet->ttl <= 1)
+	{
+		send_icmp_time_exceeded(ntohl(ip_packet->src_addr), input_dev->ip_dev->address, ICMP_TIME_EXCEEDED_CODE_TIME_TO_LIVE_EXCEEDED, buffer, len);
+		return;
+	}
+
+	// TLL を1減らす
+	ip_packet->ttl--;
+
+	// IP Header checksum の再計算
+	ip_packet->header_checksum = 0;
+	ip_packet->header_checksum = checksum_16(reinterpret_cast<uint16_t *>(buffer), sizeof(ip_header), 0);
+
+	// my_buf 構造にコピー
+	my_buf *ip_fwd_mybuf = my_buf::create(len);
+	memcpy(ip_fwd_mybuf->buffer, buffer, len);
+	ip_fwd_mybuf->len = len;
+
+	if (route->type == connected)
+	{
+		ip_output_to_host(route->dev, ntohl(ip_packet->dest_addr), ntohl(ip_packet->src_addr), ip_fwd_mybuf);
+
+		return;
+	}
+	else if (route->type == network) // 直接接続ネットワークの経路ではなかったら
+	{
+		ip_output_to_next_hop(route->next_hop, ip_fwd_mybuf); // next hop に送信
+		return;
 	}
 }
 
@@ -168,5 +209,85 @@ void ip_encapsulate_output(uint32_t dest_addr, uint32_t src_addr, my_buf *payloa
 			}
 			ethernet_encapsulate_output(dev, entry->mac_addr, ip_mybuf, ETHER_TYPE_IP);
 		}
+	}
+}
+
+/**
+ * IP パケットを送信
+ * @param dest_addr
+ * @param src_addr
+ * @param buffer
+ */
+void ip_output(uint32_t dest_addr, uint32_t src_addr, my_buf *buffer)
+{
+	// 宛先 IP アドレスへの経路を検索
+	ip_route_entry *route = binary_trie_search(ip_fib, dest_addr);
+	if (route == nullptr)
+	{
+		LOG_IP("[output] No route to %s\n", ip_htoa(dest_addr));
+		my_buf::my_buf_free(buffer, true); // Drop packet
+		return;
+	}
+	// 直接接続ネットワークだったら
+	if (route->type == connected)
+	{
+		ip_output_to_host(route->dev, dest_addr, src_addr, buffer);
+		return;
+	}
+	else if (route->type == network)
+	{
+		ip_output_to_next_hop(route->next_hop, buffer);
+		return;
+	}
+}
+
+/**
+ * IP パケットをイーサネットで直接ホストに送信
+ * @param dev
+ * @param dest_addr
+ * @param src_addr
+ * @param payload_mybuf
+ */
+void ip_output_to_host(net_device *dev, uint32_t dest_addr, uint32_t src_addr, my_buf *payload_mybuf)
+{
+	arp_table_entry *entry = search_arp_table_entry(dest_addr); // ARP テーブルの検索
+
+	if (!entry) // ARP エントリがなかったら
+	{
+		LOG_IP("Trying ip output to host, but no arp record to %s\n", ip_htoa(dest_addr));
+		send_arp_request(dev, dest_addr);					// ARP リクエストの送信
+		my_buf::my_buf_free(payload_mybuf, true); // Drop packet
+		return;
+	}
+	else
+	{
+		ethernet_encapsulate_output(entry->dev, entry->mac_addr, payload_mybuf, ETHER_TYPE_IP); // イーサネットでカプセル化して送信
+	}
+}
+
+void ip_output_to_next_hop(uint32_t next_hop, my_buf *buffer)
+{
+	arp_table_entry *entry = search_arp_table_entry(next_hop); // ARP Table の検索
+
+	if (!entry)
+	{
+		LOG_IP("Trying ip output to next hop, but no arp record to %s\n", ip_htoa(next_hop));
+
+		ip_route_entry *route_to_next_hop = binary_trie_search(ip_fib, next_hop); // ルーティングテーブルのルックアップ
+
+		if (route_to_next_hop == nullptr or route_to_next_hop->type != connected) // next hop への経路がなかったら
+		{
+			LOG_IP("Next hop %s is not reachable\n", ip_htoa(next_hop));
+		}
+		else
+		{
+			send_arp_request(route_to_next_hop->dev, next_hop); // ARP リクエストを送信
+		}
+		my_buf::my_buf_free(buffer, true); // Drop packet
+		return;
+	}
+	else
+	{
+		ethernet_encapsulate_output(entry->dev, entry->mac_addr, buffer, ETHER_TYPE_IP); // イーサネットでカプセル化して送信
 	}
 }
