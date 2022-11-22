@@ -1,4 +1,5 @@
 #include "arp.h"
+
 #include "ethernet.h"
 #include "ip.h"
 #include "log.h"
@@ -35,7 +36,6 @@ void add_arp_table_entry(net_device *dev, uint8_t *mac_addr, uint32_t ip_addr)
 	while (candidate->next != nullptr)
 	{
 		candidate = candidate->next;
-
 		if (candidate->ip_addr == ip_addr)
 		{
 			memcpy(candidate->mac_addr, mac_addr, 6);
@@ -50,6 +50,36 @@ void add_arp_table_entry(net_device *dev, uint8_t *mac_addr, uint32_t ip_addr)
 	memcpy(candidate->next->mac_addr, mac_addr, 6);
 	candidate->next->ip_addr = ip_addr;
 	candidate->next->dev = dev;
+}
+
+/**
+ * ARP テーブルの検索
+ * @param ip_addr
+ * @return
+ */
+arp_table_entry *search_arp_table_entry(uint32_t ip_addr)
+{
+	arp_table_entry *candidate = &arp_table[ip_addr % ARP_TABLE_SIZE];
+
+	if (candidate->ip_addr == ip_addr)
+	{
+		return candidate;
+	}
+	else if (candidate->ip_addr = 0)
+	{
+		return nullptr;
+	}
+
+	while (candidate->next != nullptr)
+	{
+		candidate = candidate->next;
+		if (candidate->ip_addr == ip_addr)
+		{
+			return candidate;
+		}
+	}
+
+	return nullptr;
 }
 
 /**
@@ -183,17 +213,4 @@ void arp_reply_arrives(net_device *dev, arp_ip_to_ethernet *reply)
 	}
 	// ARP Table エントリの追加
 	add_arp_table_entry(dev, reply->sha, ntohl(reply->spa));
-}
-
-arp_table_entry *search_arp_table_entry(uint32_t ip_addr)
-{
-	for (auto &entry : arp_table)
-	{
-		if (entry.ip_addr == ip_addr)
-		{
-			return &entry;
-		}
-	}
-
-	return nullptr;
 }
