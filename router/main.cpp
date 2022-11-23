@@ -63,10 +63,20 @@ void configure_ip()
 			IP_ADDRESS(192, 168, 0, 1),
 			IP_ADDRESS(255, 255, 255, 0));
 
+	configure_ip_address(
+			get_net_device_by_name("router1-router3"),
+			IP_ADDRESS(192, 168, 3, 1),
+			IP_ADDRESS(255, 255, 255, 0));
+
 	configure_ip_net_route(
 			IP_ADDRESS(192, 168, 2, 0),
 			24,
 			IP_ADDRESS(192, 168, 0, 2));
+
+	configure_ip_net_route(
+			IP_ADDRESS(192, 168, 4, 0),
+			24,
+			IP_ADDRESS(192, 168, 3, 2));
 }
 
 int net_device_transmit(struct net_device *dev, uint8_t *buffer, size_t len);
@@ -155,10 +165,8 @@ int main()
 			printf("Created device %s socket %d\n", dev->name, sock);
 
 			// add net_device to net_dev_list
-			net_device *next;
-			next = net_dev_list;
+			dev->next = net_dev_list;
 			net_dev_list = dev;
-			dev->next = next;
 
 			// set non blocking
 			// get File descriptor flag
