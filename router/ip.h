@@ -29,11 +29,14 @@ struct ip_header
 	uint32_t dest_addr;
 } __attribute__((packed));
 
+struct nat_device;
+
 struct ip_device
 {
 	uint32_t address = 0;
 	uint32_t netmask = 0;
 	uint32_t broadcast = 0;
+	nat_device *nat_dev = nullptr;
 };
 
 struct net_device;
