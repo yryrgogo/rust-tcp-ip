@@ -10,4 +10,6 @@ void configure_ip_net_route(uint32_t prefix, uint32_t prefix_len, uint32_t next_
 
 void configure_ip_address(net_device *dev, uint32_t address, uint32_t netmask);
 
+void configure_ip_napt(net_device *inside, net_device *outside);
+
 #endif // CURO_CONFIG_H

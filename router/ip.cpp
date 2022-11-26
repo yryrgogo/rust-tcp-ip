@@ -4,6 +4,7 @@
 #include "ip.h"
 #include "log.h"
 #include "my_buf.h"
+#include "napt.h"
 #include "net.h"
 #include "utils.h"
 
@@ -78,6 +79,51 @@ void ip_input(net_device *input_dev, uint8_t *buffer, ssize_t len)
 			}
 	}
 
+	// NAT の内側から外側への通信
+	if (input_dev->ip_dev->nat_dev != nullptr)
+	{
+		// インターネットにプライベートアドレス宛の通信が漏れないよう、NAPT による変換ができないならドロップする
+		if (ip_packet->protocol == IP_PROTOCOL_NUM_UDP)
+		{
+			if (!nat_exec(
+							ip_packet,
+							len,
+							input_dev->ip_dev->nat_dev,
+							nat_protocol::udp,
+							nat_direction::outgoing))
+			{
+				return;
+			}
+		}
+		else if (ip_packet->protocol == IP_PROTOCOL_NUM_TCP)
+		{
+			if (!nat_exec(ip_packet,
+										len,
+										input_dev->ip_dev->nat_dev,
+										nat_protocol::tcp,
+										nat_direction::outgoing))
+			{
+				return;
+			}
+		}
+		else if (ip_packet->protocol == IP_PROTOCOL_NUM_ICMP)
+		{
+			if (!nat_exec(
+							ip_packet,
+							len,
+							input_dev->ip_dev->nat_dev,
+							nat_protocol::icmp,
+							nat_direction::outgoing))
+			{
+				return;
+			}
+		}
+		else
+		{
+			LOG_IP("NAT unimplemented packet dropped type=%d\n", ip_packet->protocol);
+		}
+	}
+
 	// 宛先 IP アドレスがルータの持っている IP アドレスでない場合はフォワーディングを行う
 	ip_route_entry *route = binary_trie_search(ip_fib, ntohl(ip_packet->dest_addr));
 	if (route == nullptr)
@@ -126,6 +172,46 @@ void ip_input(net_device *input_dev, uint8_t *buffer, ssize_t len)
  */
 void ip_input_to_ours(net_device *input_dev, ip_header *ip_packet, size_t len)
 {
+	// NAT の通信の向きを確認
+	for (net_device *dev = net_dev_list; dev; dev = dev->next)
+	{
+		if (dev->ip_dev != nullptr and dev->ip_dev->nat_dev != nullptr and dev->ip_dev->nat_dev->outside_addr == ntohl(ip_packet->dest_addr))
+		{
+			bool nat_executed = false;
+			switch (ip_packet->protocol)
+			{
+			case IP_PROTOCOL_NUM_UDP:
+				if (nat_exec(ip_packet, len, dev->ip_dev->nat_dev, nat_protocol::udp, nat_direction::incoming))
+				{
+					nat_executed = true;
+				}
+				break;
+			case IP_PROTOCOL_NUM_TCP:
+				if (nat_exec(ip_packet, len, dev->ip_dev->nat_dev, nat_protocol::tcp, nat_direction::incoming))
+				{
+					printf("#####################################\n");
+					nat_executed = true;
+				}
+				break;
+			case IP_PROTOCOL_NUM_ICMP:
+				if (nat_exec(ip_packet, len, dev->ip_dev->nat_dev, nat_protocol::icmp, nat_direction::incoming))
+				{
+					nat_executed = true;
+				}
+				break;
+			}
+
+			if (nat_executed)
+			{
+				my_buf *nat_fwd_mybuf = my_buf::create(len);
+				memcpy(nat_fwd_mybuf->buffer, ip_packet, len);
+				nat_fwd_mybuf->len = len;
+				ip_output(ntohl(ip_packet->dest_addr), ntohl(ip_packet->src_addr), nat_fwd_mybuf);
+				return;
+			}
+		}
+	}
+
 	// 上位プロトコルの処理に移行
 	switch (ip_packet->protocol)
 	{

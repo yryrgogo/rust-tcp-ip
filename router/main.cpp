@@ -1,21 +1,22 @@
-#include "ethernet.h"
-#include "ip.h"
-#include "log.h"
-#include "net.h"
-#include "utils.h"
 #include <cstdint>
 #include <fcntl.h>
 #include <ifaddrs.h>
 #include <iostream>
-#include <termios.h>
 #include <linux/if_ether.h>
 #include <net/if.h>
 #include <netpacket/packet.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <termios.h>
 #include <unistd.h>
 #include "config.h"
+#include "ethernet.h"
+#include "ip.h"
+#include "log.h"
+#include "napt.h"
+#include "net.h"
+#include "utils.h"
 
 bool is_ignore_interface(const char *ifname)
 {
@@ -53,8 +54,9 @@ net_device *get_net_device_by_name(const char *name)
  */
 void configure_ip()
 {
+
 	configure_ip_address(
-			get_net_device_by_name("router1-host1"),
+			get_net_device_by_name("router1-br0"),
 			IP_ADDRESS(192, 168, 1, 1),
 			IP_ADDRESS(255, 255, 255, 0));
 
@@ -63,20 +65,11 @@ void configure_ip()
 			IP_ADDRESS(192, 168, 0, 1),
 			IP_ADDRESS(255, 255, 255, 0));
 
-	configure_ip_address(
-			get_net_device_by_name("router1-router3"),
-			IP_ADDRESS(192, 168, 3, 1),
-			IP_ADDRESS(255, 255, 255, 0));
-
 	configure_ip_net_route(
-			IP_ADDRESS(192, 168, 2, 0),
-			24,
-			IP_ADDRESS(192, 168, 0, 2));
+			IP_ADDRESS(192, 168, 2, 0), 24, IP_ADDRESS(192, 168, 0, 2));
 
-	configure_ip_net_route(
-			IP_ADDRESS(192, 168, 4, 0),
-			24,
-			IP_ADDRESS(192, 168, 3, 2));
+	configure_ip_napt(
+			get_net_device_by_name("router1-br0"), get_net_device_by_name("router1-router2"));
 }
 
 int net_device_transmit(struct net_device *dev, uint8_t *buffer, size_t len);
@@ -206,6 +199,10 @@ int main()
 			if (input == 'a')
 			{
 				// dump_arp_table_entry();
+			}
+			else if (input == 'n')
+			{
+				// dump_nat_tables();
 			}
 			else if (input == 'q')
 			{

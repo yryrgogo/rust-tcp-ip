@@ -65,6 +65,7 @@ void dump_nat_table()
  */
 bool nat_exec(ip_header *ip_packet, size_t len, nat_device *nat_dev, nat_protocol proto, nat_direction direction)
 {
+	// TODO: ip_packet のペイロードは、そのまま nat_packet_head にマッピングできる構造になっているのか？
 	auto *nat_packet = (nat_packet_head *)((uint8_t *)ip_packet + sizeof(ip_header));
 
 	// ICMP だったら、クエリパケットのみ NAT する
